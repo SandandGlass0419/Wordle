@@ -2,7 +2,7 @@ use std::io;
 use colored::{ColoredString, Colorize};
 
 fn main() {
-    let word = "PIRELI"; // upper
+    let word = "FERRIS"; // upper
 
     let mut state = State::new(5);
     let won = turn(word, &mut state);
