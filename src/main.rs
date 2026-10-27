@@ -13,7 +13,7 @@ fn main() {
 fn turn(word: &str, state: &mut State) -> bool {
     if state.attempts > state.tries { return false }
 
-    let guess = read_guess(&format!("Guess {}/{}, {} letters", state.attempts, state.tries, word.chars().count()));
+    let guess = read_guess(&format!("Guess {}/{}, {} letters", state.attempts, state.tries, len(word)));
 
     let Ok(colored_guess) = color_guess(word, &guess) else {
         println!("Bad guess length!");
@@ -42,71 +42,56 @@ fn read_guess(message: &str)-> String {
 fn color_guess(word: &str, guess: &str) -> Result<Vec<Letter>, String> {
     validate_guess(word, guess)?;
 
-    let queue = queue_indexes(word, guess)?;
+    let mut colored_guess: Vec<Letter> = guess.chars().map(|c| Letter::new(c, Color::Gray)).collect();
+    
+    for (i, l) in colored_guess.iter_mut().enumerate() {
+        color_green(nth(word, i)?, l);
 
-    let mut colored_guess = guess.chars().map(|c| Letter::Gray(c)).collect();
-    color(&mut colored_guess, &queue.0, Letter::GREEN);
-    color(&mut colored_guess, &queue.1, Letter::YELLOW);
+        color_yellow(word, l);
+    }
+
 
     Ok(colored_guess)
 }
 
 fn validate_guess(word: &str, guess: &str) -> Result<(), String> {
-    if word.chars().count() != guess.chars().count() {
+    if len(word) != len(guess) {
         return Err(String::from("bad"))
-    }
-
+    } 
+    
     Ok(())
 }
 
-fn queue_indexes(word: &str, guess: &str) -> Result<(Vec<usize>, Vec<usize>), String> {
-    let mut green_queue = Vec::new();
-    let mut yellow_queue = Vec::new();
-
-    for i in 0..guess.chars().count() {
-        if green(nth(word, i)?, nth(guess, i)?) {
-            green_queue.push(i);
-        }
-        else if yellow(word, nth(guess, i)?) {
-            yellow_queue.push(i);
-        }
+fn color_green(word: char, guess: &mut Letter) {
+    if word == guess.char {
+        guess.color(Color::Green);
     }
-
-    Ok((green_queue, yellow_queue))
 }
 
-fn nth(str: &str, n: usize) -> Result<char, String> {
-    str.chars().nth(n).ok_or(String::from("bad"))
-}
-
-fn green(word: char, guess: char) -> bool {
-    word == guess
-}
-
-fn yellow(word: &str, guess: char) -> bool {
-    word.contains(guess)
-}
-
-fn color(letters: &mut Vec<Letter>, queue: &[usize], color: Letter) {
-    for &i in queue {
-        letters[i] = letters[i].to_color(color);
+fn color_yellow(word: &str, guess: &mut Letter) {
+    if word.contains(guess.char) {
+        guess.color(Color::Yellow)
     }
+}
+
+fn verify(guess: &Vec<Letter>) -> bool {
+    guess.iter().all(|l| l.color == Color::Green)
+}
+
+fn nth(word: &str, n: usize) -> Result<char, String> {
+    word.chars().nth(n).ok_or(String::from("bad"))
+}
+
+fn len(word: &str) -> usize {
+    word.chars().count()
 }
 
 fn print_letters(letters: &Vec<Letter>) {
-    for &l in letters {
+    for l in letters {
         print!("{}", l.as_bg_colored());
     }
 
     println!();
-}
-
-fn verify(colored_guess: &Vec<Letter>) -> bool {
-    for &l in colored_guess {
-        let Letter::Green(_) = l else { return false };
-    }
-
-    true
 }
 
 struct State {
@@ -122,24 +107,24 @@ impl State {
         State {
             attempts: 1,
             tries: tries,
-            progress: State::CHAR_SET.chars().map(|c| Letter::White(c)).collect(),
+            progress: State::CHAR_SET.chars().map(|c| Letter::new(c, Color::White)).collect(),
         }
     }
 
     fn update(&mut self, guess: &Vec<Letter>) {
-        for &l in guess {
-            if let Some(_mut_l) = self.progress_find(l) {
-                *_mut_l = _mut_l.to_color(l);
+        for l in guess {
+            if let Some(_mut_l) = self.progress_find(&l) {
+                _mut_l.color(l.color);
             }       
         }
     }
 
-    fn progress_find(&mut self, letter: Letter) -> Option<&mut Letter> {
-        self.progress.iter_mut().find(|l| l.unwrap() == letter.unwrap())
+    fn progress_find(&mut self, letter: &Letter) -> Option<&mut Letter> {
+        self.progress.iter_mut().find(|l| l.char == letter.char)
     }
 
     fn progress_print(&self) {  
-        for &l in &self.progress {
+        for l in &self.progress {
             print!("{} ", l.as_fg_colored());
         }
 
@@ -147,53 +132,64 @@ impl State {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Letter {
-    Gray(char),
-    Yellow(char),
-    Green(char),
-    White(char),
+struct Letter {
+    char: char,
+    color: Color,
 }
 
 impl Letter {
-    const GRAY: Letter = Letter::Gray(char::MIN);
-    const YELLOW: Letter = Letter::Yellow(char::MIN);
-    const GREEN: Letter = Letter::Green(char::MIN);
-    const WHITE: Letter = Letter::White(char::MIN);
-
-    fn unwrap(&self) -> char {
-        match self {
-            Letter::Gray(c) => *c,
-            Letter::Yellow(c) => *c,
-            Letter::Green(c) => *c,
-            Letter::White(c) => *c,
+    fn new(char: char, color: Color) -> Letter {
+        Letter {
+            char: char,
+            color: color,
         }
     }
 
-    fn to_color(&self, color: Letter) -> Letter {
-        match color {
-            Letter::Gray(_) => Letter::Gray(self.unwrap()),
-            Letter::Yellow(_) => Letter::Yellow(self.unwrap()),
-            Letter::Green(_) => Letter::Green(self.unwrap()),
-            Letter::White(_) => Letter::White(self.unwrap()),
+    fn color(&mut self, color: Color) {
+        if color.lvl() > self.color.lvl() {
+            self.color = color;
         }
     }
 
     fn as_bg_colored(&self) -> ColoredString {
-        match self {
-            Letter::Gray(c) => c.to_string().on_bright_black().bold(),
-            Letter::Yellow(c) => c.to_string().on_yellow().bold(),
-            Letter::Green(c) => c.to_string().on_green().bold(),
-            Letter::White(c) => c.to_string().on_white().bold(),
+        match self.color {
+            Color::Gray => self.char.to_string().on_bright_black().bold(),
+            Color::Yellow => self.char.to_string().on_yellow().bold(),
+            Color::Green => self.char.to_string().on_green().bold(),
+            Color::White => self.char.to_string().on_white().bold(),
         }
     }
 
     fn as_fg_colored(&self) -> ColoredString {
+        match self.color {
+            Color::Gray => self.char.to_string().bright_black(),
+            Color::Yellow => self.char.to_string().yellow().bold(),
+            Color::Green => self.char.to_string().green().bold(),
+            Color::White => self.char.to_string().white(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Color {
+    Gray,
+    Yellow,
+    Green,
+    White,
+}
+
+impl Color {
+    const GRAY_LVL: u8 = 1;
+    const YELLOW_LVL: u8 = 2;
+    const GREEN_LVL: u8 = 3;
+    const WHITE_LVL: u8 = 0;
+
+    fn lvl(&self) -> u8 {
         match self {
-            Letter::Gray(c) => c.to_string().bright_black(),
-            Letter::Yellow(c) => c.to_string().yellow().bold(),
-            Letter::Green(c) => c.to_string().green().bold(),
-            Letter::White(c) => c.to_string().white(),
+            Color::Gray => Color::GRAY_LVL,
+            Color::Yellow => Color::YELLOW_LVL,
+            Color::Green => Color::GREEN_LVL,
+            Color::White => Color::WHITE_LVL,
         }
     }
 }
