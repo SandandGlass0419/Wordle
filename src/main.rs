@@ -4,42 +4,73 @@ use std::collections::HashSet;
 use colored::{ColoredString, Colorize};
 
 fn main() {
-    let raw = load_dict();
-    
     let matches = match_args();
-    let tries = *matches.get_one::<i32>("tries").unwrap_or(&7);
 
-    let rand_word = raw[fastrand::usize(0..raw.len())].clone();
-    let word = matches.get_one::<String>("word").unwrap_or(&rand_word).to_lowercase();
+    let raw;
+
+    let arg_tries = *matches.get_one::<u32>("tries").unwrap_or(&7);
+    let arg_len = *matches.get_one::<u32>("len").unwrap_or(&fastrand::u32(4..=8));
+    let arg_word = match matches.get_one::<String>("word") {
+        Some(s) => {
+            raw = load_dict(len(s) as u32);
+            s.to_lowercase()
+        }
+        None => {
+            raw = load_dict(arg_len);
+            raw[fastrand::usize(0..raw.len())].clone()
+        }
+    };
     
     let dict = HashSet::from_iter(raw);
 
-    let mut state = State::new(tries);
-    let won = turn(&dict, &word, &mut state);
+    let mut state = State::new(arg_tries);
+    let won = turn(&dict, &arg_word, &mut state);
 
-    println!("{} Word: {}", if won {"Win!"} else {"Lose!"}, word.to_uppercase());
+    println!("{} Word: {}", if won {"Win!"} else {"Lose!"}, arg_word.to_uppercase());
 }
 
 fn match_args() -> ArgMatches {
     let tries = Arg::new("tries")
         .short('t')
         .long("tries")
-        .help("Set tries to get in game.")
-        .value_parser(value_parser!(i32));
+        .value_parser(value_parser!(u32).range(1..))
+        .help("Set tries to get in game.");
 
     let word = Arg::new("word")
         .short('w')
         .long("word")
+        .value_parser(|s: &str|
+            match len(s) {
+                4..=8 => Ok(s.to_string()),
+                _ => Err(format!("'{s}' is not 4-8 letters.")),
+            }
+        )
         .help("Set target word manually. (overrides dict)");
+
+    let len = Arg::new("len")
+        .short('l')
+        .long("len")
+        .value_parser(value_parser!(u32).range(4..=8))
+        .conflicts_with("word")
+        .help("Select a random word with specified length.");
 
     command!()
         .arg(tries)
         .arg(word)
+        .arg(len)
         .get_matches()
 }
 
-fn load_dict() -> Vec<String> {
-    include_str!("../dict/dict.txt").split('\n').map(|s| s.trim().to_string()).collect()
+fn load_dict(len: u32) -> Vec<String> {
+    match len {
+        4 => include_str!("../dict/4.txt"),
+        5 => include_str!("../dict/5.txt"),
+        6 => include_str!("../dict/6.txt"),
+        7 => include_str!("../dict/7.txt"),
+        8 => include_str!("../dict/8.txt"),
+        _ => panic!("dict load failed"),
+    }
+    .split('\n').map(|s| s.trim().to_string()).collect()
 }
 
 fn turn(dict: &HashSet<String>, word: &str, state: &mut State) -> bool {
@@ -68,7 +99,7 @@ fn read_guess(message: &str) -> String {
     println!("{}", message);
 
     let mut buf = String::new();
-    io::stdin().read_line(&mut buf).expect("failed to read");
+    io::stdin().read_line(&mut buf).expect("read failed");
 
     buf.trim().to_lowercase()
 }
@@ -126,15 +157,15 @@ fn print_letters(letters: &Vec<Letter>) {
 }
 
 struct State {
-    attempt: i32,
-    tries: i32,
+    attempt: u32,
+    tries: u32,
     progress: Vec<Letter>
 }
 
 impl State {
     const CHAR_SET: &str = "abcdefghijklmnopqrstuvwxyz";
 
-    fn new(tries: i32) -> State {
+    fn new(tries: u32) -> State {
         State {
             attempt: 1,
             tries: tries,
