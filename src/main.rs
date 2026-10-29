@@ -1,69 +1,104 @@
 use std::io;
+use clap::{Arg, ArgMatches, command, value_parser};
+use std::collections::HashSet;
 use colored::{ColoredString, Colorize};
 
 fn main() {
-    let word = "FERRIS"; // upper
+    let raw = load_dict();
+    
+    let matches = match_args();
+    let tries = *matches.get_one::<i32>("tries").unwrap_or(&7);
 
-    let mut state = State::new(5);
-    let won = turn(word, &mut state);
+    let rand_word = raw[fastrand::usize(0..raw.len())].clone();
+    let word = matches.get_one::<String>("word").unwrap_or(&rand_word).to_lowercase();
+    
+    let dict = HashSet::from_iter(raw);
 
-    println!("{} Word: {}", if won {"Win!"} else {"Lose!"} ,word);
+    let mut state = State::new(tries);
+    let won = turn(&dict, &word, &mut state);
+
+    println!("{} Word: {}", if won {"Win!"} else {"Lose!"}, word.to_uppercase());
 }
 
-fn turn(word: &str, state: &mut State) -> bool {
-    if state.attempts > state.tries { return false }
+fn match_args() -> ArgMatches {
+    let tries = Arg::new("tries")
+        .short('t')
+        .long("tries")
+        .help("Set tries to get in game.")
+        .value_parser(value_parser!(i32));
 
-    let guess = read_guess(&format!("Guess {}/{}, {} letters", state.attempts, state.tries, len(word)));
+    let word = Arg::new("word")
+        .short('w')
+        .long("word")
+        .help("Set target word manually. (overrides dict)");
 
-    let Ok(colored_guess) = color_guess(word, &guess) else {
-        println!("Bad guess length!");
+    command!()
+        .arg(tries)
+        .arg(word)
+        .get_matches()
+}
 
-        return turn(word, state)
-    };
+fn load_dict() -> Vec<String> {
+    include_str!("../dict/dict.txt").split('\n').map(|s| s.trim().to_string()).collect()
+}
+
+fn turn(dict: &HashSet<String>, word: &str, state: &mut State) -> bool {
+    if state.attempt > state.tries { return false }
+
+    let guess = read_guess(&format!("Guess {}/{}, {} letters", state.attempt, state.tries, len(word)));
+
+    if let Err(err) = validate_guess(dict, word, &guess) {
+        println!("{err}");
+
+        return turn(dict, word, state)
+    }
+
+    let colored_guess = color_guess(word, &guess);
 
     state.update(&colored_guess);
-    state.attempts += 1;
+    state.attempt += 1;
 
     print_letters(&colored_guess);
     state.progress_print();
 
-    if verify(&colored_guess) { true } else { turn(word, state) }
+    if verify(&colored_guess) { true } else { turn(dict, word, state) }
 }
 
-fn read_guess(message: &str)-> String {
+fn read_guess(message: &str) -> String {
     println!("{}", message);
 
     let mut buf = String::new();
     io::stdin().read_line(&mut buf).expect("failed to read");
 
-    buf.trim().to_uppercase()
+    buf.trim().to_lowercase()
 }
 
-fn color_guess(word: &str, guess: &str) -> Result<Vec<Letter>, String> {
-    validate_guess(word, guess)?;
-
+fn color_guess(word: &str, guess: &str) -> Vec<Letter> {
     let mut colored_guess: Vec<Letter> = guess.chars().map(|c| Letter::new(c, Color::Gray)).collect();
     
     for (i, l) in colored_guess.iter_mut().enumerate() {
-        color_green(nth(word, i)?, l);
+        color_green(word.chars().nth(i), l);
 
         color_yellow(word, l);
     }
 
-
-    Ok(colored_guess)
+    colored_guess
 }
 
-fn validate_guess(word: &str, guess: &str) -> Result<(), String> {
-    if len(word) != len(guess) {
-        return Err(String::from("bad"))
-    } 
-    
-    Ok(())
+fn validate_guess(dict: &HashSet<String>, word: &str, guess: &str) -> Result<(), String> {
+    if word == guess {  // custom word not in dict
+        Ok(())
+    } else if len(word) != len(guess) {
+        Err(String::from("Wrong letter count!"))
+    } else if !dict.contains(guess) {
+        Err(String::from("Not a word!"))
+    } else {
+        Ok(())
+    }
 }
 
-fn color_green(word: char, guess: &mut Letter) {
-    if word == guess.char {
+fn color_green(word: Option<char>, guess: &mut Letter) {
+    if let Some(c) = word && c == guess.char {
         guess.color(Color::Green);
     }
 }
@@ -76,10 +111,6 @@ fn color_yellow(word: &str, guess: &mut Letter) {
 
 fn verify(guess: &Vec<Letter>) -> bool {
     guess.iter().all(|l| l.color == Color::Green)
-}
-
-fn nth(word: &str, n: usize) -> Result<char, String> {
-    word.chars().nth(n).ok_or(String::from("bad"))
 }
 
 fn len(word: &str) -> usize {
@@ -95,17 +126,17 @@ fn print_letters(letters: &Vec<Letter>) {
 }
 
 struct State {
-    attempts: i32,
+    attempt: i32,
     tries: i32,
     progress: Vec<Letter>
 }
 
 impl State {
-    const CHAR_SET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const CHAR_SET: &str = "abcdefghijklmnopqrstuvwxyz";
 
     fn new(tries: i32) -> State {
         State {
-            attempts: 1,
+            attempt: 1,
             tries: tries,
             progress: State::CHAR_SET.chars().map(|c| Letter::new(c, Color::White)).collect(),
         }
@@ -152,20 +183,24 @@ impl Letter {
     }
 
     fn as_bg_colored(&self) -> ColoredString {
+        let s = self.char.to_uppercase().to_string();
+        
         match self.color {
-            Color::Gray => self.char.to_string().on_bright_black().bold(),
-            Color::Yellow => self.char.to_string().on_yellow().bold(),
-            Color::Green => self.char.to_string().on_green().bold(),
-            Color::White => self.char.to_string().on_white().bold(),
+            Color::Gray => s.on_bright_black().bold(),
+            Color::Yellow => s.on_yellow().bold(),
+            Color::Green => s.on_green().bold(),
+            Color::White => s.on_white().bold(),
         }
     }
 
     fn as_fg_colored(&self) -> ColoredString {
+        let s = self.char.to_uppercase().to_string();
+        
         match self.color {
-            Color::Gray => self.char.to_string().bright_black(),
-            Color::Yellow => self.char.to_string().yellow().bold(),
-            Color::Green => self.char.to_string().green().bold(),
-            Color::White => self.char.to_string().white(),
+            Color::Gray => s.bright_black(),
+            Color::Yellow => s.yellow().bold(),
+            Color::Green => s.green().bold(),
+            Color::White => s.white(),
         }
     }
 }
